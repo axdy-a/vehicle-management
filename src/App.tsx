@@ -102,8 +102,28 @@ export default function App() {
   const streamRef = useRef<MediaStream | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraSnapFlash, setCameraSnapFlash] = useState(false);
+  /** Non-zero drives remount animation for capture toast banner. */
+  const [captureBannerKey, setCaptureBannerKey] = useState(0);
+  const captureBannerTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(
+    null,
+  );
+  const cameraSnapFlashTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(
+    null,
+  );
 
   const stopCamera = useCallback(() => {
+    if (captureBannerTimerRef.current) {
+      window.clearTimeout(captureBannerTimerRef.current);
+      captureBannerTimerRef.current = null;
+    }
+    if (cameraSnapFlashTimerRef.current) {
+      window.clearTimeout(cameraSnapFlashTimerRef.current);
+      cameraSnapFlashTimerRef.current = null;
+    }
+    setCameraSnapFlash(false);
+    setCaptureBannerKey(0);
+
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     const v = videoRef.current;
@@ -161,6 +181,32 @@ export default function App() {
         setFiles((prev) => [...prev, file]);
         setOcrLine(null);
         setOcrError(null);
+
+        if (cameraSnapFlashTimerRef.current) {
+          window.clearTimeout(cameraSnapFlashTimerRef.current);
+        }
+        setCameraSnapFlash(true);
+        cameraSnapFlashTimerRef.current = window.setTimeout(() => {
+          setCameraSnapFlash(false);
+          cameraSnapFlashTimerRef.current = null;
+        }, 240);
+
+        if (captureBannerTimerRef.current) {
+          window.clearTimeout(captureBannerTimerRef.current);
+        }
+        setCaptureBannerKey((k) => k + 1);
+        captureBannerTimerRef.current = window.setTimeout(() => {
+          setCaptureBannerKey(0);
+          captureBannerTimerRef.current = null;
+        }, 2400);
+
+        try {
+          if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+            navigator.vibrate(40);
+          }
+        } catch {
+          /* ignore */
+        }
       },
       'image/jpeg',
       0.88,
@@ -179,6 +225,12 @@ export default function App() {
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
+      if (captureBannerTimerRef.current) {
+        window.clearTimeout(captureBannerTimerRef.current);
+      }
+      if (cameraSnapFlashTimerRef.current) {
+        window.clearTimeout(cameraSnapFlashTimerRef.current);
+      }
     };
   }, []);
 
@@ -477,9 +529,25 @@ export default function App() {
               </button>
             ) : (
               <div className="camera-panel">
-                <div className="camera-video-wrap">
+                <div
+                  className={
+                    cameraSnapFlash
+                      ? 'camera-video-wrap camera-video-wrap--snap'
+                      : 'camera-video-wrap'
+                  }
+                >
                   <video ref={videoRef} muted playsInline autoPlay />
                 </div>
+                {captureBannerKey > 0 ? (
+                  <div
+                    key={captureBannerKey}
+                    className="capture-banner"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    ✓ Image taken — added to list
+                  </div>
+                ) : null}
                 <div className="camera-actions">
                   <button type="button" className="btn btn-primary" onClick={snapPhoto}>
                     Snap photo
@@ -555,8 +623,8 @@ export default function App() {
             {ocrBusy ? 'Scanning on device…' : 'Guess mileage & cashcard'}
           </button>
           <p style={{ margin: 0, fontSize: '0.76rem', color: 'var(--grab-ink-muted)' }}>
-            Free: runs locally in your browser (first load downloads language pack from CDN).
-            Always verify before submitting.
+            Free: OCR runs on your phone; the engine is served from this same site (first run can
+            take 10–20s). Always verify numbers before submitting.
           </p>
           {ocrLine ? (
             <div className="ocr-strip" aria-live="polite">

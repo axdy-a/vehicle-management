@@ -393,6 +393,62 @@ textarea.input:focus {
   border-radius: 16px;
   overflow: hidden;
   background: #0b0d0c;
+  position: relative;
+}
+
+.camera-video-wrap--snap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.88);
+  animation: cameraSnapBurst 260ms ease-out forwards;
+}
+
+@keyframes cameraSnapBurst {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.capture-banner {
+  margin-top: 12px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  text-align: center;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--grab-ink);
+  background: linear-gradient(135deg, rgba(123, 220, 181, 0.55), rgba(2, 177, 80, 0.18));
+  border: 2px solid rgba(2, 177, 80, 0.45);
+  box-shadow: 0 10px 24px rgba(2, 177, 80, 0.2);
+  animation: captureBannerPop 2.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes captureBannerPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.88) translateY(10px);
+  }
+  10% {
+    opacity: 1;
+    transform: scale(1.02) translateY(0);
+  }
+  18% {
+    transform: scale(1) translateY(0);
+  }
+  78% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.98) translateY(-6px);
+  }
 }
 
 .camera-video-wrap video {

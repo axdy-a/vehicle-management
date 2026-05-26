@@ -13,7 +13,9 @@ Optional: copy `.env.example` to `.env` and set `VITE_FLEET_PASSWORD` to **overr
 
 ## OCR (stay free)
 
-**Tesseract.js** runs **in the browser** (workers + WASM pulled from CDN so GitHub Pages `base` paths stay reliable). Mileage/cash guesses are heuristic — **always confirm** before submitting. No Google Vision or paid OCR APIs.
+**Tesseract.js** runs **in the browser**. Worker, WASM core, and English data are **copied into `public/ocr/`** by `scripts/copy-ocr-assets.mjs` on **`npm install`** / **`npm run build`** (from `tesseract.js`, `tesseract.js-core`, and `@tesseract.js-data/eng`). That keeps everything **same-origin** as your GitHub Pages app so **mobile Safari/Chrome** are not stuck at 0% loading language packs from a CDN.
+
+Mileage/cash guesses are heuristic — **always confirm** before submitting. No Google Vision or paid OCR APIs.
 
 ## Deploy to GitHub Pages
 

@@ -5,8 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "predev": "npm run copy-ocr-assets",
+    "copy-ocr-assets": "node scripts/copy-ocr-assets.mjs",
+    "prebuild": "npm run copy-ocr-assets",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "postinstall": "npm run copy-ocr-assets"
   },
   "dependencies": {
     "react": "^19.1.0",
@@ -14,6 +18,7 @@
     "tesseract.js": "^5.1.1"
   },
   "devDependencies": {
+    "@tesseract.js-data/eng": "1.0.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^5.0.4",
