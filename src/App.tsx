@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { scanPhotosForMetrics } from './ocr/scanPhotos';
 
 const STORAGE_KEY = 'fleet_access_ok_v1';
@@ -51,6 +51,8 @@ type LogPayload = {
   photoCount: number;
   photoNames: string[];
   submittedAt: string;
+  /** Driver attestation (checkbox) before Submit. */
+  fitToDriveDeclared: boolean;
 };
 
 function buildLogPayload(
@@ -59,6 +61,7 @@ function buildLogPayload(
   mileage: string,
   cashcard: string,
   files: File[],
+  fitToDriveDeclared: boolean,
 ): LogPayload {
   const v = DEMO_VEHICLES.find((x) => x.id === vehicleId);
   return {
@@ -71,6 +74,7 @@ function buildLogPayload(
     photoCount: files.length,
     photoNames: files.map((f) => f.name),
     submittedAt: new Date().toISOString(),
+    fitToDriveDeclared,
   };
 }
 
@@ -86,12 +90,97 @@ export default function App() {
   const [mileage, setMileage] = useState('');
   const [cashcard, setCashcard] = useState('');
   const [purpose, setPurpose] = useState('');
+  const [fitToDriveConfirmed, setFitToDriveConfirmed] = useState(false);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrLine, setOcrLine] = useState<string | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<string | null>(null);
   const [submitErr, setSubmitErr] = useState<string | null>(null);
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+
+  const stopCamera = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    const v = videoRef.current;
+    if (v) {
+      v.srcObject = null;
+    }
+    setCameraOpen(false);
+  }, []);
+
+  const startCamera = useCallback(async () => {
+    setCameraError(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError(
+        'Camera API not available in this browser. Use “Add from gallery” or try Safari/Chrome on HTTPS.',
+      );
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+        },
+        audio: false,
+      });
+      streamRef.current = stream;
+      setCameraOpen(true);
+    } catch (e) {
+      const msg =
+        e instanceof Error
+          ? e.message
+          : 'Could not open camera (check permissions / site is HTTPS).';
+      setCameraError(msg);
+      stopCamera();
+    }
+  }, [stopCamera]);
+
+  const snapPhoto = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || video.readyState < 2) return;
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    if (!w || !h) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, w, h);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        const name = `capture-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+        const file = new File([blob], name, { type: 'image/jpeg' });
+        setFiles((prev) => [...prev, file]);
+        setOcrLine(null);
+        setOcrError(null);
+      },
+      'image/jpeg',
+      0.88,
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!cameraOpen || !streamRef.current) return;
+    const video = videoRef.current;
+    if (!video) return;
+    video.srcObject = streamRef.current;
+    void video.play().catch(() => undefined);
+  }, [cameraOpen]);
+
+  useEffect(() => {
+    return () => {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    };
+  }, []);
 
   const passwordOk = useCallback((entered: string) => {
     // Client check is UX-only; Apps Script / Cloud must validate fleet secret server-side.
@@ -118,6 +207,8 @@ export default function App() {
   }, [code, passwordOk]);
 
   const handleLock = useCallback(() => {
+    stopCamera();
+
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {
@@ -125,13 +216,27 @@ export default function App() {
     }
     setUnlocked(false);
     setCode('');
+    setFitToDriveConfirmed(false);
     setSubmitMsg(null);
     setSubmitErr(null);
+  }, [stopCamera]);
+
+  /** Appends so multi-capture + gallery can combine. */
+  const onGalleryPick = useCallback((list: FileList | null) => {
+    if (!list?.length) return;
+    setFiles((prev) => [...prev, ...Array.from(list)]);
+    setOcrLine(null);
+    setOcrError(null);
   }, []);
 
-  const onFiles = useCallback((list: FileList | null) => {
-    if (!list?.length) return;
-    setFiles(Array.from(list));
+  const removePhotoAt = useCallback((index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+    setOcrLine(null);
+    setOcrError(null);
+  }, []);
+
+  const clearPhotos = useCallback(() => {
+    setFiles([]);
     setOcrLine(null);
     setOcrError(null);
   }, []);
@@ -173,15 +278,34 @@ export default function App() {
   }, [vehicleId]);
 
   const previewPayload = useCallback(() => {
-    const payload = buildLogPayload(vehicleId, purpose, mileage, cashcard, files);
+    const payload = buildLogPayload(
+      vehicleId,
+      purpose,
+      mileage,
+      cashcard,
+      files,
+      fitToDriveConfirmed,
+    );
     window.alert(JSON.stringify(payload, null, 2));
-  }, [vehicleId, purpose, mileage, cashcard, files]);
+  }, [vehicleId, purpose, mileage, cashcard, files, fitToDriveConfirmed]);
 
   const submitLog = useCallback(async () => {
     setSubmitErr(null);
     setSubmitMsg(null);
 
-    const payload = buildLogPayload(vehicleId, purpose, mileage, cashcard, files);
+    if (!fitToDriveConfirmed) {
+      setSubmitErr('Confirm you are fit to drive before submitting.');
+      return;
+    }
+
+    const payload = buildLogPayload(
+      vehicleId,
+      purpose,
+      mileage,
+      cashcard,
+      files,
+      fitToDriveConfirmed,
+    );
     const ingestUrl = import.meta.env.VITE_INGEST_URL?.trim();
 
     if (!ingestUrl) {
@@ -230,7 +354,7 @@ export default function App() {
     } finally {
       setSubmitBusy(false);
     }
-  }, [vehicleId, purpose, mileage, cashcard, files]);
+  }, [vehicleId, purpose, mileage, cashcard, files, fitToDriveConfirmed]);
 
   if (!unlocked) {
     return (
@@ -335,34 +459,87 @@ export default function App() {
         </div>
 
         <div>
-          <label className="label" htmlFor="photos">
+          <label className="label" htmlFor="photos-gallery-input">
             Photos
           </label>
           <div className="upload-zone">
-            <strong>Bulk add photos</strong>
-            <p>Dash, odometer, cashcard, fuel — multiple files ok.</p>
-            <div style={{ marginTop: 12 }}>
-              <input
-                id="photos"
-                type="file"
-                accept="image/*"
-                multiple
-                capture="environment"
-                onChange={(e) => onFiles(e.target.files)}
-              />
+            <strong>Capture or pick multiple</strong>
+            <p>Use the camera for several snaps (odometer, cashcard, etc.), or add shots from gallery.</p>
+
+            {!cameraOpen ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ marginTop: 12, width: '100%' }}
+                onClick={() => void startCamera()}
+              >
+                Open camera (multi-capture)
+              </button>
+            ) : (
+              <div className="camera-panel">
+                <div className="camera-video-wrap">
+                  <video ref={videoRef} muted playsInline autoPlay />
+                </div>
+                <div className="camera-actions">
+                  <button type="button" className="btn btn-primary" onClick={snapPhoto}>
+                    Snap photo
+                  </button>
+                  <button type="button" className="btn btn-secondary" onClick={stopCamera}>
+                    Done / close camera
+                  </button>
+                </div>
+                <p className="camera-hint">
+                  Tap <strong>Snap</strong> for each photo — they accumulate below. Allowed on HTTPS only
+                  (your GitHub Pages site is OK).
+                </p>
+              </div>
+            )}
+
+            {cameraError ? <div className="error-banner">{cameraError}</div> : null}
+
+            <div className="gallery-picker-row">
+              <label htmlFor="photos-gallery-input" className="btn btn-secondary gallery-picker-label">
+                Add from gallery (multi-select)
+                <input
+                  id="photos-gallery-input"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="visually-hidden"
+                  onChange={(e) => {
+                    onGalleryPick(e.target.files);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+              {files.length ? (
+                <button type="button" className="btn btn-ghost btn-compact-danger" onClick={clearPhotos}>
+                  Clear all photos
+                </button>
+              ) : null}
             </div>
+
             <div className="hint-row" style={{ marginTop: 12, justifyContent: 'center' }}>
-              <span className="hint-chip">Camera</span>
+              <span className="hint-chip">Multi snap</span>
               <span className="hint-chip">Gallery</span>
-              <span className="hint-chip">Tesseract OCR</span>
+              <span className="hint-chip">OCR</span>
             </div>
           </div>
           {files.length > 0 ? (
-            <ul className="file-list" aria-label="Selected files">
-              {files.map((f) => (
-                <li key={`${f.name}-${f.size}`}>
-                  <span>{f.name}</span>
-                  <span>{(f.size / 1024).toFixed(0)} KB</span>
+            <ul className="file-list" aria-label="Selected photos">
+              {files.map((f, i) => (
+                <li key={`${f.name}-${f.size}-${i}`}>
+                  <span className="file-list-name">{f.name}</span>
+                  <span className="file-list-meta">
+                    <span>{(f.size / 1024).toFixed(0)} KB</span>
+                    <button
+                      type="button"
+                      className="file-list-remove"
+                      onClick={() => removePhotoAt(i)}
+                    >
+                      Remove
+                    </button>
+                  </span>
                 </li>
               ))}
             </ul>
@@ -419,6 +596,19 @@ export default function App() {
             />
           </div>
         </div>
+
+        <label className="checkbox-field" htmlFor="fit-to-drive">
+          <input
+            id="fit-to-drive"
+            type="checkbox"
+            checked={fitToDriveConfirmed}
+            onChange={(e) => setFitToDriveConfirmed(e.target.checked)}
+          />
+          <span>
+            I confirm I feel rested, alert, and fit to drive this vehicle safely (not impaired by
+            fatigue, medication, illness, alcohol, or other factors that could affect driving).
+          </span>
+        </label>
         </main>
       </div>
 
@@ -440,7 +630,7 @@ export default function App() {
           <button
             type="button"
             className="btn btn-primary"
-            disabled={submitBusy || ocrBusy}
+            disabled={submitBusy || ocrBusy || !fitToDriveConfirmed}
             onClick={() => void submitLog()}
           >
             {submitBusy ? 'Sending…' : 'Submit log'}

@@ -33,6 +33,7 @@ function doPost(e) {
     const sheet = ss.getSheetByName(SHEET_TAB) || ss.insertSheet(SHEET_TAB);
 
     // Header row created once — adjust columns to taste.
+    // Existing sheets (old header): add column J title 'fitToDriveDeclared' manually, or recreate tab.
     if (sheet.getLastRow() === 0) {
       sheet.appendRow([
         'submittedAt',
@@ -44,6 +45,7 @@ function doPost(e) {
         'cashcardBalance',
         'photoCount',
         'photoNames',
+        'fitToDriveDeclared',
       ]);
     }
 
@@ -57,6 +59,7 @@ function doPost(e) {
       data.cashcardBalance || '',
       data.photoCount != null ? data.photoCount : '',
       Array.isArray(data.photoNames) ? data.photoNames.join(', ') : '',
+      data.fitToDriveDeclared === true ? true : false,
     ]);
 
     return jsonOut(true);
