@@ -11,6 +11,10 @@ npm run dev
 
 Optional: copy `.env.example` to `.env` and set `VITE_FLEET_PASSWORD` to **override** the built-in default unlock code (`grabmapssg` when the env var is unset).
 
+## OCR (stay free)
+
+**Tesseract.js** runs **in the browser** (workers + WASM pulled from CDN so GitHub Pages `base` paths stay reliable). Mileage/cash guesses are heuristic — **always confirm** before submitting. No Google Vision or paid OCR APIs.
+
 ## Deploy to GitHub Pages
 
 The workflow `.github/workflows/deploy-pages.yml` builds on every push to `main` and publishes `dist/` via **GitHub Actions Pages**.

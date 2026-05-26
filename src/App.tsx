@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import { scanPhotosForMetrics } from './ocr/scanPhotos';
 
 const STORAGE_KEY = 'fleet_access_ok_v1';
 /** Fallback when `VITE_FLEET_PASSWORD` is not set at build time. */
@@ -29,6 +30,9 @@ export default function App() {
   const [files, setFiles] = useState<File[]>([]);
   const [mileage, setMileage] = useState('');
   const [cashcard, setCashcard] = useState('');
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrLine, setOcrLine] = useState<string | null>(null);
+  const [ocrError, setOcrError] = useState<string | null>(null);
 
   const passwordOk = useCallback((entered: string) => {
     // Client check is UX-only; Apps Script / Cloud must validate fleet secret server-side.
@@ -67,7 +71,41 @@ export default function App() {
   const onFiles = useCallback((list: FileList | null) => {
     if (!list?.length) return;
     setFiles(Array.from(list));
+    setOcrLine(null);
+    setOcrError(null);
   }, []);
+
+  const runOcrGuess = useCallback(async () => {
+    if (!files.length) return;
+    setOcrBusy(true);
+    setOcrError(null);
+    setOcrLine('Starting on-device OCR (Tesseract)…');
+
+    try {
+      const guess = await scanPhotosForMetrics(files, (status) =>
+        setOcrLine(status),
+      );
+
+      if (guess.mileageKm) setMileage(guess.mileageKm);
+      if (guess.cashBalance) setCashcard(guess.cashBalance);
+
+      if (!guess.mileageKm && !guess.cashBalance) {
+        setOcrError(
+          'Could not confidently read mileage or balance. Try sharper photos or edit fields manually.',
+        );
+        setOcrLine(null);
+      } else {
+        setOcrLine('Done — check numbers before submitting.');
+      }
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'OCR failed. Try again or enter values manually.';
+      setOcrError(msg);
+      setOcrLine(null);
+    } finally {
+      setOcrBusy(false);
+    }
+  }, [files]);
 
   const selectedVehicleLabel = useMemo(() => {
     return DEMO_VEHICLES.find((v) => v.id === vehicleId)?.label ?? 'Select vehicle';
@@ -179,7 +217,7 @@ export default function App() {
             <div className="hint-row" style={{ marginTop: 12, justifyContent: 'center' }}>
               <span className="hint-chip">Camera</span>
               <span className="hint-chip">Gallery</span>
-              <span className="hint-chip">OCR later</span>
+              <span className="hint-chip">Tesseract OCR</span>
             </div>
           </div>
           {files.length > 0 ? (
@@ -192,6 +230,26 @@ export default function App() {
               ))}
             </ul>
           ) : null}
+
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ marginTop: 12, width: '100%' }}
+            disabled={files.length === 0 || ocrBusy}
+            onClick={runOcrGuess}
+          >
+            {ocrBusy ? 'Scanning on device…' : 'Guess mileage & cashcard'}
+          </button>
+          <p style={{ margin: 0, fontSize: '0.76rem', color: 'var(--grab-ink-muted)' }}>
+            Free: runs locally in your browser (first load downloads language pack from CDN).
+            Always verify before submitting.
+          </p>
+          {ocrLine ? (
+            <div className="ocr-strip" aria-live="polite">
+              <strong>Status:</strong> {ocrLine}
+            </div>
+          ) : null}
+          {ocrError ? <div className="error-banner">{ocrError}</div> : null}
         </div>
 
         <div className="field-row-grid">

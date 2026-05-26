@@ -350,3 +350,19 @@ select {
 .file-list li:last-child {
   border-bottom: none;
 }
+
+.ocr-strip {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--grab-ink-muted);
+  background: rgba(123, 220, 181, 0.25);
+  border: 1px solid rgba(2, 177, 80, 0.2);
+  border-radius: 14px;
+  padding: 10px 12px;
+  word-break: break-word;
+}
+
+.ocr-strip strong {
+  color: var(--grab-ink);
+  font-weight: 800;
+}
