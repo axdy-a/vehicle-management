@@ -6,9 +6,16 @@ const STORAGE_KEY = 'fleet_access_ok_v1';
 const DEFAULT_FLEET_PASSWORD = 'grabmapssg';
 
 const DEMO_VEHICLES = [
-  { id: 'vh-001', label: 'SBA1234Z — Toyota Hiace', plate: 'SBA1234Z' },
-  { id: 'vh-002', label: 'SBS5678H — Mitsubishi Fuso', plate: 'SBS5678H' },
-  { id: 'vh-003', label: 'SHC9012X — Renault Master', plate: 'SHC9012X' },
+  {
+    id: 'vh-snc3154m',
+    label: 'SNC 3154 M — Black (4W LIDAR)',
+    plate: 'SNC3154M',
+  },
+  {
+    id: 'vh-snb9492c',
+    label: 'SNB 9492 C — Red (KC2 Car)',
+    plate: 'SNB9492C',
+  },
 ];
 
 function readStoredUnlock(): boolean {
@@ -17,6 +24,54 @@ function readStoredUnlock(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Strip symbols ($, commas, spaces, etc.); keep digits and one decimal point. */
+function sanitizeCashcardInput(raw: string): string {
+  const chars = [...raw.replace(/[^\d.]/g, '')];
+  let out = '';
+  let decimalUsed = false;
+  for (const ch of chars) {
+    if (/\d/.test(ch)) out += ch;
+    else if (ch === '.' && !decimalUsed) {
+      out += '.';
+      decimalUsed = true;
+    }
+  }
+  return out;
+}
+
+type LogPayload = {
+  vehicleId: string;
+  plate: string;
+  vehicleLabel: string;
+  purpose: string;
+  mileageKm: string;
+  cashcardBalance: string;
+  photoCount: number;
+  photoNames: string[];
+  submittedAt: string;
+};
+
+function buildLogPayload(
+  vehicleId: string,
+  purpose: string,
+  mileage: string,
+  cashcard: string,
+  files: File[],
+): LogPayload {
+  const v = DEMO_VEHICLES.find((x) => x.id === vehicleId);
+  return {
+    vehicleId,
+    plate: v?.plate ?? '',
+    vehicleLabel: v?.label ?? '',
+    purpose,
+    mileageKm: mileage,
+    cashcardBalance: cashcard,
+    photoCount: files.length,
+    photoNames: files.map((f) => f.name),
+    submittedAt: new Date().toISOString(),
+  };
 }
 
 export default function App() {
@@ -30,9 +85,13 @@ export default function App() {
   const [files, setFiles] = useState<File[]>([]);
   const [mileage, setMileage] = useState('');
   const [cashcard, setCashcard] = useState('');
+  const [purpose, setPurpose] = useState('');
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrLine, setOcrLine] = useState<string | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [submitMsg, setSubmitMsg] = useState<string | null>(null);
+  const [submitErr, setSubmitErr] = useState<string | null>(null);
 
   const passwordOk = useCallback((entered: string) => {
     // Client check is UX-only; Apps Script / Cloud must validate fleet secret server-side.
@@ -66,6 +125,8 @@ export default function App() {
     }
     setUnlocked(false);
     setCode('');
+    setSubmitMsg(null);
+    setSubmitErr(null);
   }, []);
 
   const onFiles = useCallback((list: FileList | null) => {
@@ -110,6 +171,66 @@ export default function App() {
   const selectedVehicleLabel = useMemo(() => {
     return DEMO_VEHICLES.find((v) => v.id === vehicleId)?.label ?? 'Select vehicle';
   }, [vehicleId]);
+
+  const previewPayload = useCallback(() => {
+    const payload = buildLogPayload(vehicleId, purpose, mileage, cashcard, files);
+    window.alert(JSON.stringify(payload, null, 2));
+  }, [vehicleId, purpose, mileage, cashcard, files]);
+
+  const submitLog = useCallback(async () => {
+    setSubmitErr(null);
+    setSubmitMsg(null);
+
+    const payload = buildLogPayload(vehicleId, purpose, mileage, cashcard, files);
+    const ingestUrl = import.meta.env.VITE_INGEST_URL?.trim();
+
+    if (!ingestUrl) {
+      setSubmitMsg(
+        'Tap received. Set VITE_INGEST_URL (Apps Script web app URL) in your build to sync to Google Sheets. Draft payload is in the browser console (F12 → Console).',
+      );
+      console.info('[fleet-log draft]', payload);
+      return;
+    }
+
+    setSubmitBusy(true);
+    try {
+      const secret =
+        typeof import.meta.env.VITE_FLEET_PASSWORD === 'string' &&
+        import.meta.env.VITE_FLEET_PASSWORD.length > 0
+          ? import.meta.env.VITE_FLEET_PASSWORD
+          : DEFAULT_FLEET_PASSWORD;
+
+      /** Body includes auth; use `text/plain` so the browser avoids CORS preflight (Apps Script often cannot answer OPTIONS). */
+      const body = JSON.stringify({
+        ...payload,
+        fleetSecret: secret,
+      });
+
+      const res = await fetch(ingestUrl, {
+        method: 'POST',
+        mode: 'cors',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8',
+        },
+        body,
+      });
+
+      if (!res.ok) {
+        const hint = await res.text().catch(() => '');
+        throw new Error(
+          hint ? `Server ${res.status}: ${hint.slice(0, 200)}` : `Server ${res.status}`,
+        );
+      }
+
+      setSubmitMsg('Submitted to your sheet.');
+    } catch (e) {
+      setSubmitErr(
+        e instanceof Error ? e.message : 'Submit failed. Check network and CORS.',
+      );
+    } finally {
+      setSubmitBusy(false);
+    }
+  }, [vehicleId, purpose, mileage, cashcard, files]);
 
   if (!unlocked) {
     return (
@@ -161,7 +282,7 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell app-shell--session">
       <header className="brand-strip">
         <div className="brand-title">
           <h1>Fleet Logs</h1>
@@ -178,7 +299,8 @@ export default function App() {
         </div>
       </div>
 
-      <main className="card stack">
+      <div className="session-scroll">
+        <main className="card stack">
         <div>
           <label className="label" htmlFor="vehicle">
             Vehicle
@@ -195,6 +317,21 @@ export default function App() {
               </option>
             ))}
           </select>
+        </div>
+
+        <div>
+          <label className="label" htmlFor="purpose">
+            Purpose
+          </label>
+          <textarea
+            id="purpose"
+            className="input"
+            rows={3}
+            autoComplete="off"
+            placeholder="e.g. Deliveries — Bedok hub, customer returns"
+            value={purpose}
+            onChange={(e) => setPurpose(e.target.value)}
+          />
         </div>
 
         <div>
@@ -276,30 +413,44 @@ export default function App() {
               inputMode="decimal"
               placeholder="e.g. 24.80"
               value={cashcard}
-              onChange={(e) => setCashcard(e.target.value)}
+              onChange={(e) =>
+                setCashcard(sanitizeCashcardInput(e.target.value))
+              }
             />
           </div>
         </div>
-      </main>
+        </main>
+      </div>
 
-      <footer className="bottom-bar">
-        <button type="button" className="btn btn-secondary">
-          Preview
-        </button>
-        <button type="button" className="btn btn-primary">
-          Submit log
-        </button>
-      </footer>
-      <p
-        style={{
-          margin: '8px 0 0',
-          fontSize: '0.76rem',
-          color: 'var(--grab-ink-muted)',
-          textAlign: 'center',
-        }}
-      >
-        Buttons are UI-only until you connect your ingest URL.
-      </p>
+      <div className="session-footer">
+        {submitErr ? (
+          <div className="error-banner" aria-live="assertive">
+            {submitErr}
+          </div>
+        ) : null}
+        {submitMsg ? (
+          <div className="success-banner" aria-live="polite">
+            {submitMsg}
+          </div>
+        ) : null}
+        <footer className="bottom-bar">
+          <button type="button" className="btn btn-secondary" onClick={previewPayload}>
+            Preview
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={submitBusy || ocrBusy}
+            onClick={() => void submitLog()}
+          >
+            {submitBusy ? 'Sending…' : 'Submit log'}
+          </button>
+        </footer>
+        <p className="footer-hint">
+          Submit works offline: without <code>VITE_INGEST_URL</code> we only log JSON to the
+          console — add your Apps Script URL in GitHub Actions to sync rows.
+        </p>
+      </div>
     </div>
   );
 }

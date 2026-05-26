@@ -31,6 +31,9 @@ jobs:
         env:
           # Repository Pages URL is https://<owner>.github.io/<repo>/ — assets must use this prefix.
           VITE_BASE_PATH: /${{ github.event.repository.name }}/
+          # Optional: GitHub repo **Variables** (`VITE_INGEST_URL`) and **Secrets** (`VITE_FLEET_PASSWORD`) for Sheet sync builds.
+          VITE_INGEST_URL: ${{ vars.VITE_INGEST_URL }}
+          VITE_FLEET_PASSWORD: ${{ secrets.VITE_FLEET_PASSWORD }}
 
       - uses: actions/upload-pages-artifact@v3
         with:

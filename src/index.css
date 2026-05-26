@@ -47,7 +47,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -59,6 +60,32 @@ select {
     max(env(safe-area-inset-bottom), 20px);
   max-width: 480px;
   margin: 0 auto;
+}
+
+/* Logged-in: keep Submit / Preview in view; scroll the form only. */
+.app-shell--session {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.app-shell--session .session-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app-shell--session > .brand-strip,
+.app-shell--session > .hero-map {
+  flex-shrink: 0;
+}
+
+.app-shell--session .session-footer {
+  flex-shrink: 0;
+  padding-top: 4px;
 }
 
 .brand-strip {
@@ -126,7 +153,8 @@ select {
 }
 
 .input,
-.select {
+.select,
+textarea.input {
   width: 100%;
   padding: 14px 14px;
   border-radius: 14px;
@@ -136,8 +164,15 @@ select {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
+textarea.input {
+  min-height: 88px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
 .input:focus,
-.select:focus {
+.select:focus,
+textarea.input:focus {
   border-color: var(--grab-mint);
   box-shadow: 0 0 0 4px rgba(123, 220, 181, 0.35);
 }
@@ -327,6 +362,32 @@ select {
   padding: 10px 12px;
   font-size: 0.85rem;
   font-weight: 600;
+}
+
+.success-banner {
+  background: rgba(2, 177, 80, 0.1);
+  border: 1px solid rgba(2, 177, 80, 0.28);
+  color: #0d5c2e;
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.footer-hint {
+  margin: 8px 0 0;
+  font-size: 0.76rem;
+  color: var(--grab-ink-muted);
+  text-align: center;
+}
+
+.footer-hint code {
+  font-size: 0.88em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: rgba(54, 58, 69, 0.07);
+  font-family: ui-monospace, monospace;
 }
 
 .file-list {

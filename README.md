@@ -27,6 +27,16 @@ The workflow `.github/workflows/deploy-pages.yml` builds on every push to `main`
 Local build (any base): `npm run build` → `dist/`. For a local preview that matches Pages, run  
 `$env:VITE_BASE_PATH='/vehicle-management/'; npm run build` (replace with your repo name).
 
+### Sheet ingest URL (fix “Tap received…” on Submit)
+
+1. In Google: create a Sheet and a tab (e.g. **`Logs`**).
+2. Copy **`gas/INGEST_SAMPLE.gs`** into a new **Apps Script** project. Set **Script properties** → **`FLEET_SECRET`** to match your app’s fleet password (default **`grabmapssg`**, or whatever you set as **`VITE_FLEET_PASSWORD`** at build time).
+3. Put your Sheet ID in the script, **Deploy** → **Web app** (**Execute as: Me**, **Who has access: Anyone**).
+4. In GitHub: **Settings → Secrets and variables → Actions** → add repository **Variable** **`VITE_INGEST_URL`** = the Web App URL from step 3. Optionally add **Secret** **`VITE_FLEET_PASSWORD`** if you changed the fleet code from default.
+5. Push to **`main`** (or **Actions → Deploy to GitHub Pages → Run workflow**) so CI rebuilds with that URL baked in.
+
+The app POSTs JSON with **`fleetSecret`** in the body and **`Content-Type: text/plain`** to avoid flaky CORS preflight against Apps Script. Your Apps Script parses the body as JSON (`e.postData.contents`).
+
 ## Google side — what to set up
 
 You have two practical paths. For “drivers have a fleet password, data goes to **my** Sheet,” **Apps Script** is usually enough and touches **Google Cloud** lightly.
