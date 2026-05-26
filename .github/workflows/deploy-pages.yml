@@ -26,13 +26,24 @@ jobs:
           node-version: '22'
           cache: npm
 
+      # Vite only bakes env in at `npm run build`. Must be defined here or the live site shows “no server”.
+      - name: Check sheet ingest URL
+        env:
+          VITE_INGEST_URL: ${{ secrets.VITE_INGEST_URL || vars.VITE_INGEST_URL }}
+        run: |
+          if [ -z "$VITE_INGEST_URL" ]; then
+            echo "::warning title=Missing VITE_INGEST_URL::The build will embed an empty ingest URL. Add Actions **Secret** OR **Variable** named VITE_INGEST_URL for this repo, then re-run the workflow (Variables: Settings → Secrets and variables → Actions → Variables tab)."
+          else
+            echo "VITE_INGEST_URL is set for this build (${#VITE_INGEST_URL} chars)."
+          fi
+
       - name: Install and build
         run: npm ci && npm run build
         env:
           # Repository Pages URL is https://<owner>.github.io/<repo>/ — assets must use this prefix.
           VITE_BASE_PATH: /${{ github.event.repository.name }}/
-          # Optional: GitHub repo **Variables** (`VITE_INGEST_URL`) and **Secrets** (`VITE_FLEET_PASSWORD`) for Sheet sync builds.
-          VITE_INGEST_URL: ${{ vars.VITE_INGEST_URL }}
+          # Prefer Secret (many teams put the URL there); Variables tab also works. Either must be named VITE_INGEST_URL exactly.
+          VITE_INGEST_URL: ${{ secrets.VITE_INGEST_URL || vars.VITE_INGEST_URL }}
           VITE_FLEET_PASSWORD: ${{ secrets.VITE_FLEET_PASSWORD }}
 
       - uses: actions/upload-pages-artifact@v3

@@ -38,7 +38,7 @@ Local build (any base): `npm run build` → `dist/`. For a local preview that ma
    - Optionally **`SHEET_ID`** to override the `SHEET_ID` constant in code.
 3. Replace **`SHEET_ID`** in `INGEST_SAMPLE.gs` with your spreadsheet ID if you’re not using the script property.
 4. **Deploy** → **Web app** (**Execute as: Me**, **who has access: Anyone**).
-5. In GitHub (**the same repo that hosts this app**): open **Settings** (repo tabs, not your profile). In the left sidebar go to **Secrets and variables** → **Actions**. Open the **Variables** tab (not *Secrets* unless you prefer), click **New repository variable**, name **`VITE_INGEST_URL`**, value = your Apps Script **Web app URL** from step 4. The workflow reads it as `vars.VITE_INGEST_URL` when building.
+5. In GitHub (**the same repo that hosts this app**): **Settings** → **Secrets and variables** → **Actions**. Add **`VITE_INGEST_URL`** as either a **repository Secret** _or_ a **Variable** (same name — the workflow uses whichever is set). Value = Apps Script Web app **`…/exec`** URL. **Re-run “Deploy to GitHub Pages”** after saving so `npm run build` picks it up.
 6. Push to **`main`** (or re-run **Deploy to GitHub Pages**) so CI picks up **`VITE_INGEST_URL`**.
 
 Submit sends **`photoUploads`** (`name`, `mimeType`, **base64**) plus row fields; the script saves images to **`DRIVE_FOLDER_ID`** and writes **`photoDriveLinks`** (newline-separated URLs) into the **`Logs`** tab. Large batches / huge photos can hit **Apps Script** POST or timeout limits — keep submits reasonable.
