@@ -68,22 +68,27 @@ function BrandMark() {
   );
 }
 
+type TripKind = 'draw' | 'return';
+
 type LogPayload = {
   vehicleId: string;
   plate: string;
   vehicleLabel: string;
+  /** Whether the driver is drawing the vehicle out or returning it. */
+  tripKind: TripKind;
   purpose: string;
   mileageKm: string;
   cashcardBalance: string;
   photoCount: number;
   photoNames: string[];
   submittedAt: string;
-  /** Driver attestation (checkbox) before Submit. */
+  /** Draw: fit-to-drive. Return: vehicle condition / PIC escalation. Same field for Sheet compatibility. */
   fitToDriveDeclared: boolean;
 };
 
 function buildLogPayload(
   vehicleId: string,
+  tripKind: TripKind,
   purpose: string,
   mileage: string,
   cashcard: string,
@@ -95,6 +100,7 @@ function buildLogPayload(
     vehicleId,
     plate: v?.plate ?? '',
     vehicleLabel: v?.label ?? '',
+    tripKind,
     purpose,
     mileageKm: mileage,
     cashcardBalance: cashcard,
@@ -117,7 +123,12 @@ export default function App() {
   const [mileage, setMileage] = useState('');
   const [cashcard, setCashcard] = useState('');
   const [purpose, setPurpose] = useState('');
+  const [tripKind, setTripKind] = useState<TripKind>('draw');
   const [fitToDriveConfirmed, setFitToDriveConfirmed] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState<{ url: string; name: string } | null>(
+    null,
+  );
+  const photoPreviewRef = useRef<{ url: string } | null>(null);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrLine, setOcrLine] = useState<string | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
@@ -163,9 +174,7 @@ export default function App() {
   const startCamera = useCallback(async () => {
     setCameraError(null);
     if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraError(
-        'Camera API not available in this browser. Use “Add from gallery” or try Safari/Chrome on HTTPS.',
-      );
+      setCameraError('Camera not available — use gallery.');
       return;
     }
     try {
@@ -179,11 +188,8 @@ export default function App() {
       streamRef.current = stream;
       setCameraOpen(true);
     } catch (e) {
-      const msg =
-        e instanceof Error
-          ? e.message
-          : 'Could not open camera (check permissions / site is HTTPS).';
-      setCameraError(msg);
+      console.warn('[camera]', e);
+      setCameraError('Could not open camera.');
       stopCamera();
     }
   }, [stopCamera]);
@@ -261,6 +267,49 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    photoPreviewRef.current = photoPreview;
+  }, [photoPreview]);
+
+  useEffect(() => {
+    return () => {
+      const p = photoPreviewRef.current;
+      if (p?.url) URL.revokeObjectURL(p.url);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!photoPreview) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPhotoPreview((prev) => {
+          if (prev?.url) URL.revokeObjectURL(prev.url);
+          return null;
+        });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [photoPreview]);
+
+  useEffect(() => {
+    setFitToDriveConfirmed(false);
+  }, [tripKind]);
+
+  const openPhotoPreview = useCallback((file: File) => {
+    setPhotoPreview((prev) => {
+      if (prev?.url) URL.revokeObjectURL(prev.url);
+      return { url: URL.createObjectURL(file), name: file.name };
+    });
+  }, []);
+
+  const closePhotoPreview = useCallback(() => {
+    setPhotoPreview((prev) => {
+      if (prev?.url) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+  }, []);
+
   const passwordOk = useCallback((entered: string) => {
     // Client check is UX-only; Apps Script / Cloud must validate fleet secret server-side.
     const fromEnv = import.meta.env.VITE_FLEET_PASSWORD;
@@ -273,7 +322,7 @@ export default function App() {
 
   const handleUnlock = useCallback(() => {
     if (!passwordOk(code)) {
-      setUnlockError('Access code not recognised. Check with your fleet admin.');
+      setUnlockError('Wrong code.');
       return;
     }
     try {
@@ -287,6 +336,10 @@ export default function App() {
 
   const handleLock = useCallback(() => {
     stopCamera();
+    setPhotoPreview((prev) => {
+      if (prev?.url) URL.revokeObjectURL(prev.url);
+      return null;
+    });
 
     try {
       localStorage.removeItem(STORAGE_KEY);
@@ -295,6 +348,7 @@ export default function App() {
     }
     setUnlocked(false);
     setCode('');
+    setTripKind('draw');
     setFitToDriveConfirmed(false);
     setSubmitMsg(null);
     setSubmitErr(null);
@@ -307,9 +361,7 @@ export default function App() {
 
     const usable = picked.filter((f) => f.size > 0 && isProbablyImageFile(f));
     if (!usable.length) {
-      setOcrError(
-        'Could not use those files as images (empty or unrecognized type). Try JPEG/PNG, or pick one album photo at a time if multi-select fails on your phone.',
-      );
+      setOcrError("Those files weren't recognized as images.");
       return;
     }
 
@@ -327,13 +379,17 @@ export default function App() {
     setFiles([]);
     setOcrLine(null);
     setOcrError(null);
+    setPhotoPreview((prev) => {
+      if (prev?.url) URL.revokeObjectURL(prev.url);
+      return null;
+    });
   }, []);
 
   const runOcrGuess = useCallback(async () => {
     if (!files.length) return;
     setOcrBusy(true);
     setOcrError(null);
-    setOcrLine('Starting on-device OCR (Tesseract)…');
+    setOcrLine('Reading photos…');
 
     try {
       const guess = await scanPhotosForMetrics(files, (status) =>
@@ -344,17 +400,14 @@ export default function App() {
       if (guess.cashBalance) setCashcard(guess.cashBalance);
 
       if (!guess.mileageKm && !guess.cashBalance) {
-        setOcrError(
-          'Could not confidently read mileage or balance. Try sharper photos or edit fields manually.',
-        );
+        setOcrError('No mileage or balance found. Enter manually.');
         setOcrLine(null);
       } else {
-        setOcrLine('Done — check numbers before submitting.');
+        setOcrLine('Check numbers before submitting.');
       }
     } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : 'OCR failed. Try again or enter values manually.';
-      setOcrError(msg);
+      console.error('[OCR]', err);
+      setOcrError('Scan failed.');
       setOcrLine(null);
     } finally {
       setOcrBusy(false);
@@ -368,6 +421,7 @@ export default function App() {
   const previewPayload = useCallback(() => {
     const payload = buildLogPayload(
       vehicleId,
+      tripKind,
       purpose,
       mileage,
       cashcard,
@@ -375,19 +429,20 @@ export default function App() {
       fitToDriveConfirmed,
     );
     window.alert(JSON.stringify(payload, null, 2));
-  }, [vehicleId, purpose, mileage, cashcard, files, fitToDriveConfirmed]);
+  }, [vehicleId, tripKind, purpose, mileage, cashcard, files, fitToDriveConfirmed]);
 
   const submitLog = useCallback(async () => {
     setSubmitErr(null);
     setSubmitMsg(null);
 
     if (!fitToDriveConfirmed) {
-      setSubmitErr('Confirm you are fit to drive before submitting.');
+      setSubmitErr('Confirm the checkbox below.');
       return;
     }
 
     const payload = buildLogPayload(
       vehicleId,
+      tripKind,
       purpose,
       mileage,
       cashcard,
@@ -397,9 +452,7 @@ export default function App() {
     const ingestUrl = import.meta.env.VITE_INGEST_URL?.trim();
 
     if (!ingestUrl) {
-      setSubmitMsg(
-        'Tap received. Set VITE_INGEST_URL (Apps Script web app URL) in your build to sync to Google Sheets. Draft payload is in the browser console (F12 → Console). Photos are not attached in draft mode.',
-      );
+      setSubmitMsg('Not sent — no server.');
       console.info('[fleet-log draft]', payload);
       return;
     }
@@ -418,15 +471,11 @@ export default function App() {
         try {
           photoUploads = await encodePhotosForDrive(files);
         } catch (enc) {
-          throw new Error(
-            enc instanceof Error
-              ? enc.message
-              : 'Could not read photos for upload. Try fewer or smaller images.',
-          );
+          console.error('[encode]', enc);
+          throw new Error('Could not read photos.');
         }
       }
 
-      /** Body includes auth; use `text/plain` so the browser avoids CORS preflight (Apps Script often cannot answer OPTIONS). */
       const body = JSON.stringify({
         ...payload,
         fleetSecret: secret,
@@ -446,25 +495,29 @@ export default function App() {
 
       if (!res.ok) {
         const hint = await res.text().catch(() => '');
-        throw new Error(
-          hint ? `Server ${res.status}: ${hint.slice(0, 200)}` : `Server ${res.status}`,
-        );
+        console.warn('[submit]', res.status, hint.slice(0, 500));
+        throw new Error('Server error.');
       }
 
-      setSubmitMsg(
-        files.length > 0
-          ? 'Submitted — row added; photos uploaded to Drive (see photoDriveLinks in Sheet).'
-          : 'Submitted to your sheet.',
-      );
+      setSubmitMsg(files.length > 0 ? 'Submitted with photos.' : 'Submitted.');
     } catch (e) {
       setSubmitMsg(null);
+      console.error('[submit]', e);
       setSubmitErr(
-        e instanceof Error ? e.message : 'Submit failed. Check network and CORS.',
+        e instanceof Error && e.message ? e.message.slice(0, 120) : 'Could not send.',
       );
     } finally {
       setSubmitBusy(false);
     }
-  }, [vehicleId, purpose, mileage, cashcard, files, fitToDriveConfirmed]);
+  }, [
+    vehicleId,
+    tripKind,
+    purpose,
+    mileage,
+    cashcard,
+    files,
+    fitToDriveConfirmed,
+  ]);
 
   if (!unlocked) {
     return (
@@ -499,11 +552,6 @@ export default function App() {
             />
           </div>
           {unlockError ? <div className="error-banner">{unlockError}</div> : null}
-          <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--grab-ink-muted)' }}>
-            This screen is themed like a Grab-style map app — green primary, light map
-            canvas, rounded cards. Wire the code check to your Apps Script / Cloud
-            endpoint (see README).
-          </p>
           <button type="button" className="btn btn-primary" onClick={handleUnlock}>
             Unlock app
           </button>
@@ -547,6 +595,49 @@ export default function App() {
           </select>
         </div>
 
+        <fieldset className="trip-kind-field">
+          <legend className="label trip-kind-legend">Draw or return</legend>
+          <p className="trip-kind-hint">Add supporting photos before you submit.</p>
+          <div
+            className="segmented"
+            role="radiogroup"
+            aria-label="Draw vehicle or return vehicle"
+          >
+            <label
+              className={
+                tripKind === 'draw'
+                  ? 'segmented-option segmented-option--on'
+                  : 'segmented-option'
+              }
+            >
+              <input
+                type="radio"
+                name="tripKind"
+                className="segmented-input"
+                checked={tripKind === 'draw'}
+                onChange={() => setTripKind('draw')}
+              />
+              Draw vehicle
+            </label>
+            <label
+              className={
+                tripKind === 'return'
+                  ? 'segmented-option segmented-option--on'
+                  : 'segmented-option'
+              }
+            >
+              <input
+                type="radio"
+                name="tripKind"
+                className="segmented-input"
+                checked={tripKind === 'return'}
+                onChange={() => setTripKind('return')}
+              />
+              Return vehicle
+            </label>
+          </div>
+        </fieldset>
+
         <div>
           <label className="label" htmlFor="purpose">
             Purpose
@@ -568,7 +659,7 @@ export default function App() {
           </div>
           <div className="upload-zone" aria-labelledby="photos-section-label">
             <strong>Capture or pick multiple</strong>
-            <p>Use the camera for several snaps (odometer, cashcard, etc.), or add shots from gallery.</p>
+            <p>Add photos from camera or gallery (odometer, cashcard, condition).</p>
 
             {!cameraOpen ? (
               <button
@@ -601,17 +692,14 @@ export default function App() {
                   </div>
                 ) : null}
                 <div className="camera-actions">
-                  <button type="button" className="btn btn-primary" onClick={snapPhoto}>
+                  <button type="button" className="btn btn-primary camera-actions-snap" onClick={snapPhoto}>
                     Snap photo
                   </button>
-                  <button type="button" className="btn btn-secondary" onClick={stopCamera}>
-                    Done / close camera
+                  <button type="button" className="btn btn-secondary camera-actions-close" onClick={stopCamera}>
+                    Close camera
                   </button>
                 </div>
-                <p className="camera-hint">
-                  Tap <strong>Snap</strong> for each photo — they accumulate below. Allowed on HTTPS only
-                  (your GitHub Pages site is OK).
-                </p>
+                <p className="camera-hint">Tap Snap for each shot; photos appear below.</p>
               </div>
             )}
 
@@ -655,20 +743,29 @@ export default function App() {
             </div>
           </div>
           {files.length > 0 ? (
-            <ul className="file-list" aria-label="Selected photos">
+            <ul className="file-list" aria-label="Selected photos; tap a row to preview">
               {files.map((f, i) => (
-                <li key={`${f.name}-${f.size}-${f.lastModified}-${i}`}>
-                  <span className="file-list-name">{f.name}</span>
-                  <span className="file-list-meta">
-                    <span>{(f.size / 1024).toFixed(0)} KB</span>
-                    <button
-                      type="button"
-                      className="file-list-remove"
-                      onClick={() => removePhotoAt(i)}
-                    >
-                      Remove
-                    </button>
-                  </span>
+                <li className="file-list-row" key={`${f.name}-${f.size}-${f.lastModified}-${i}`}>
+                  <button
+                    type="button"
+                    className="file-list-hit"
+                    onClick={() => openPhotoPreview(f)}
+                  >
+                    <span className="file-list-name">{f.name}</span>
+                    <span className="file-list-meta-row">
+                      <span className="file-list-kb">{(f.size / 1024).toFixed(0)} KB</span>
+                      <span className="file-list-view-hint" aria-hidden>
+                        Tap to view
+                      </span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="file-list-remove"
+                    onClick={() => removePhotoAt(i)}
+                  >
+                    Remove
+                  </button>
                 </li>
               ))}
             </ul>
@@ -684,8 +781,7 @@ export default function App() {
             {ocrBusy ? 'Scanning on device…' : 'Guess mileage & cashcard'}
           </button>
           <p style={{ margin: 0, fontSize: '0.76rem', color: 'var(--grab-ink-muted)' }}>
-            Free: OCR runs on your phone; the engine is served from this same site (first run can
-            take 10–20s). Always verify numbers before submitting.
+            First scan can take ~20s. Verify numbers yourself.
           </p>
           {ocrLine ? (
             <div className="ocr-strip" aria-live="polite">
@@ -734,8 +830,18 @@ export default function App() {
             onChange={(e) => setFitToDriveConfirmed(e.target.checked)}
           />
           <span>
-            I confirm I feel rested, alert, and fit to drive this vehicle safely (not impaired by
-            fatigue, medication, illness, alcohol, or other factors that could affect driving).
+            {tripKind === 'return' ? (
+              <>
+                I confirm this vehicle is in acceptable condition with no damage or faults I noticed
+                at return. If anything is wrong or unclear, I will contact the PIC (person in charge)
+                and not treat the return as silently complete.
+              </>
+            ) : (
+              <>
+                I confirm I feel rested, alert, and fit to drive this vehicle safely (not impaired by
+                fatigue, medication, illness, alcohol, or other factors that could affect driving).
+              </>
+            )}
           </span>
         </label>
         </main>
@@ -765,11 +871,40 @@ export default function App() {
             {submitBusy ? 'Sending…' : 'Submit log'}
           </button>
         </footer>
-        <p className="footer-hint">
-          Submit works offline: without <code>VITE_INGEST_URL</code> we only log JSON to the
-          console — add your Apps Script URL in GitHub Actions to sync rows.
-        </p>
       </div>
+
+      {photoPreview ? (
+        <div
+          className="photo-preview-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Photo preview"
+          onClick={closePhotoPreview}
+        >
+          <div
+            className="photo-preview-sheet"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="photo-preview-toolbar">
+              <p className="photo-preview-caption">{photoPreview.name}</p>
+              <button
+                type="button"
+                className="btn btn-secondary photo-preview-close"
+                onClick={closePhotoPreview}
+              >
+                Close
+              </button>
+            </div>
+            <div className="photo-preview-frame">
+              <img
+                src={photoPreview.url}
+                alt={`Preview: ${photoPreview.name}`}
+                className="photo-preview-img"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

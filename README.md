@@ -38,14 +38,14 @@ Local build (any base): `npm run build` → `dist/`. For a local preview that ma
    - Optionally **`SHEET_ID`** to override the `SHEET_ID` constant in code.
 3. Replace **`SHEET_ID`** in `INGEST_SAMPLE.gs` with your spreadsheet ID if you’re not using the script property.
 4. **Deploy** → **Web app** (**Execute as: Me**, **who has access: Anyone**).
-5. In GitHub: **Settings → Secrets and variables → Actions** → repository **Variable** **`VITE_INGEST_URL`** = Web App URL.
+5. In GitHub (**the same repo that hosts this app**): open **Settings** (repo tabs, not your profile). In the left sidebar go to **Secrets and variables** → **Actions**. Open the **Variables** tab (not *Secrets* unless you prefer), click **New repository variable**, name **`VITE_INGEST_URL`**, value = your Apps Script **Web app URL** from step 4. The workflow reads it as `vars.VITE_INGEST_URL` when building.
 6. Push to **`main`** (or re-run **Deploy to GitHub Pages**) so CI picks up **`VITE_INGEST_URL`**.
 
 Submit sends **`photoUploads`** (`name`, `mimeType`, **base64**) plus row fields; the script saves images to **`DRIVE_FOLDER_ID`** and writes **`photoDriveLinks`** (newline-separated URLs) into the **`Logs`** tab. Large batches / huge photos can hit **Apps Script** POST or timeout limits — keep submits reasonable.
 
 The app POSTs **`fleetSecret`** inside JSON with **`Content-Type: text/plain`** so mobile browsers avoid bad CORS preflights.
 
-**Existing Logs sheet:** if you already have a header row, insert a new column **`photoDriveLinks`** before the next submit so columns line up.
+**Existing Logs sheet:** if you already have a header row, insert new columns to match **`gas/INGEST_SAMPLE.gs`** (`tripKind` after `vehicleLabel`, and **`photoDriveLinks`** at the end) before the next submit so columns line up.
 
 ## Google side — what to set up
 
@@ -57,7 +57,7 @@ No separate Cloud Run project is required. You still use Google’s infrastructu
 
 1. **Google Sheet**  
    Create a spreadsheet. Add a **`Logs`** tab with a header row matching **`gas/INGEST_SAMPLE.gs`** (or let the script create it on first row):  
-   `submittedAt | vehicleId | plate | vehicleLabel | purpose | mileageKm | cashcardBalance | photoCount | photoNames | fitToDriveDeclared | photoDriveLinks`
+   `submittedAt | vehicleId | plate | vehicleLabel | tripKind | purpose | mileageKm | cashcardBalance | photoCount | photoNames | fitToDriveDeclared | photoDriveLinks`
 
 2. **Apps Script project**  
    Use **`gas/INGEST_SAMPLE.gs`** as your `doPost(e)` implementation. It:
