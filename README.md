@@ -32,12 +32,20 @@ Local build (any base): `npm run build` → `dist/`. For a local preview that ma
 ### Sheet ingest URL (fix “Tap received…” on Submit)
 
 1. In Google: create a Sheet and a tab (e.g. **`Logs`**).
-2. Copy **`gas/INGEST_SAMPLE.gs`** into a new **Apps Script** project. Set **Script properties** → **`FLEET_SECRET`** to match your app’s fleet password (default **`grabmapssg`**, or whatever you set as **`VITE_FLEET_PASSWORD`** at build time).
-3. Put your Sheet ID in the script, **Deploy** → **Web app** (**Execute as: Me**, **Who has access: Anyone**).
-4. In GitHub: **Settings → Secrets and variables → Actions** → add repository **Variable** **`VITE_INGEST_URL`** = the Web App URL from step 3. Optionally add **Secret** **`VITE_FLEET_PASSWORD`** if you changed the fleet code from default.
-5. Push to **`main`** (or **Actions → Deploy to GitHub Pages → Run workflow**) so CI rebuilds with that URL baked in.
+2. Copy **`gas/INGEST_SAMPLE.gs`** into **Apps Script**. Set script properties:
+   - **`FLEET_SECRET`** — same value as your app fleet password (`grabmapssg` or **`VITE_FLEET_PASSWORD`**).
+   - **`DRIVE_FOLDER_ID`** — optional but required for uploads: either paste into **`gas/INGEST_SAMPLE.gs`** (`const DRIVE_FOLDER_ID = '…'` next to **`SHEET_ID`**) or set the **same-name** Script property (property wins). ID is the segment after `/folders/` in the Drive URL. Same Google account must own the folder; first save/run may ask you to authorize **Drive**.
+   - Optionally **`SHEET_ID`** to override the `SHEET_ID` constant in code.
+3. Replace **`SHEET_ID`** in `INGEST_SAMPLE.gs` with your spreadsheet ID if you’re not using the script property.
+4. **Deploy** → **Web app** (**Execute as: Me**, **who has access: Anyone**).
+5. In GitHub: **Settings → Secrets and variables → Actions** → repository **Variable** **`VITE_INGEST_URL`** = Web App URL.
+6. Push to **`main`** (or re-run **Deploy to GitHub Pages**) so CI picks up **`VITE_INGEST_URL`**.
 
-The app POSTs JSON with **`fleetSecret`** in the body and **`Content-Type: text/plain`** to avoid flaky CORS preflight against Apps Script. Your Apps Script parses the body as JSON (`e.postData.contents`).
+Submit sends **`photoUploads`** (`name`, `mimeType`, **base64**) plus row fields; the script saves images to **`DRIVE_FOLDER_ID`** and writes **`photoDriveLinks`** (newline-separated URLs) into the **`Logs`** tab. Large batches / huge photos can hit **Apps Script** POST or timeout limits — keep submits reasonable.
+
+The app POSTs **`fleetSecret`** inside JSON with **`Content-Type: text/plain`** so mobile browsers avoid bad CORS preflights.
+
+**Existing Logs sheet:** if you already have a header row, insert a new column **`photoDriveLinks`** before the next submit so columns line up.
 
 ## Google side — what to set up
 
@@ -48,14 +56,14 @@ You have two practical paths. For “drivers have a fleet password, data goes to
 No separate Cloud Run project is required. You still use Google’s infrastructure.
 
 1. **Google Sheet**  
-   Create a spreadsheet. Add header row, e.g.  
-   `timestamp | vehicle_id | mileage_km | cashcard | photo_links | submitted_by_hint`
+   Create a spreadsheet. Add a **`Logs`** tab with a header row matching **`gas/INGEST_SAMPLE.gs`** (or let the script create it on first row):  
+   `submittedAt | vehicleId | plate | vehicleLabel | purpose | mileageKm | cashcardBalance | photoCount | photoNames | fitToDriveDeclared | photoDriveLinks`
 
 2. **Apps Script project**  
-   Extensions → Apps Script (or script.google.com). Add a `doPost(e)` handler that:
-   - Reads JSON body (vehicle, mileage, cashcard, optional base64 blobs or Drive file IDs).
-   - Compares `Authorization` header or body field against a **fleet secret** stored in **Project Settings → Script properties** (`FLEET_SECRET`), not in the repo.
-   - Appends rows to your sheet via Spreadsheet ID.
+   Use **`gas/INGEST_SAMPLE.gs`** as your `doPost(e)` implementation. It:
+   - Parses JSON from `e.postData.contents` (including **`photoUploads`** base64 blobs).
+   - Compares **`fleetSecret`** to **Script property** **`FLEET_SECRET`**.
+   - Appends rows to your sheet; optionally uploads photos to **Script property** **`DRIVE_FOLDER_ID`** and fills **`photoDriveLinks`**.
 
 3. **Deploy as Web app**  
    Deploy → New deployment → type **Web app**.  
@@ -67,8 +75,8 @@ No separate Cloud Run project is required. You still use Google’s infrastructu
    - Proxy through a tiny Cloudflare Worker, **or**
    - Use **`google.script.run`–only flows** won’t apply from static SPA — so prefer a **standalone script** deployed as Web App and test OPTIONS/POST from the browser early.
 
-5. **Drive for photos** (optional)  
-   In the same script, create files in a folder you own (`Drive.Files.insert` advanced service or DriveApp). Store links in the sheet.
+5. **Drive for photos**  
+   Same sample script: set **`DRIVE_FOLDER_ID`** to a folder you own; submit payload includes **`photoUploads`** and the script writes **`photoDriveLinks`** (newline-separated URLs) into the row.
 
 **Google Cloud involvement (optional for Apps Script):**  
 Open [Google Cloud Console](https://console.cloud.google.com/) only if you enable extra APIs from script (e.g. Vision for OCR). Then: **enable API** → **billing** link on project → OAuth consent **Internal** vs **External** if you later add OAuth for admins.

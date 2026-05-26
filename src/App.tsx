@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { scanPhotosForMetrics } from './ocr/scanPhotos';
+import { encodePhotosForDrive } from './upload/encodePhotosForDrive';
 
 const STORAGE_KEY = 'fleet_access_ok_v1';
 /** Fallback when `VITE_FLEET_PASSWORD` is not set at build time. */
@@ -39,6 +40,32 @@ function sanitizeCashcardInput(raw: string): string {
     }
   }
   return out;
+}
+
+/** Some mobile pickers leave MIME type empty (e.g. HEIC); still allow by extension. */
+function isProbablyImageFile(f: File): boolean {
+  const t = (f.type || '').toLowerCase();
+  if (t.startsWith('image/')) return true;
+  const n = f.name.toLowerCase();
+  return /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?)$/.test(n);
+}
+
+/** Map-pin mark in the header (replaces the old full-width hero banner). */
+function BrandMark() {
+  return (
+    <div className="brand-mark" aria-hidden>
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        width={22}
+        height={22}
+        fill="currentColor"
+        focusable="false"
+      >
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5S13.38 11.5 12 11.5z" />
+      </svg>
+    </div>
+  );
 }
 
 type LogPayload = {
@@ -274,11 +301,20 @@ export default function App() {
   }, [stopCamera]);
 
   /** Appends so multi-capture + gallery can combine. */
-  const onGalleryPick = useCallback((list: FileList | null) => {
-    if (!list?.length) return;
-    setFiles((prev) => [...prev, ...Array.from(list)]);
+  const onGalleryPick = useCallback((picked: File[]) => {
     setOcrLine(null);
+    if (!picked.length) return;
+
+    const usable = picked.filter((f) => f.size > 0 && isProbablyImageFile(f));
+    if (!usable.length) {
+      setOcrError(
+        'Could not use those files as images (empty or unrecognized type). Try JPEG/PNG, or pick one album photo at a time if multi-select fails on your phone.',
+      );
+      return;
+    }
+
     setOcrError(null);
+    setFiles((prev) => [...prev, ...usable]);
   }, []);
 
   const removePhotoAt = useCallback((index: number) => {
@@ -362,7 +398,7 @@ export default function App() {
 
     if (!ingestUrl) {
       setSubmitMsg(
-        'Tap received. Set VITE_INGEST_URL (Apps Script web app URL) in your build to sync to Google Sheets. Draft payload is in the browser console (F12 → Console).',
+        'Tap received. Set VITE_INGEST_URL (Apps Script web app URL) in your build to sync to Google Sheets. Draft payload is in the browser console (F12 → Console). Photos are not attached in draft mode.',
       );
       console.info('[fleet-log draft]', payload);
       return;
@@ -376,11 +412,28 @@ export default function App() {
           ? import.meta.env.VITE_FLEET_PASSWORD
           : DEFAULT_FLEET_PASSWORD;
 
+      let photoUploads: Awaited<ReturnType<typeof encodePhotosForDrive>> | undefined;
+      if (files.length > 0) {
+        setSubmitMsg('Preparing photos for Google Drive…');
+        try {
+          photoUploads = await encodePhotosForDrive(files);
+        } catch (enc) {
+          throw new Error(
+            enc instanceof Error
+              ? enc.message
+              : 'Could not read photos for upload. Try fewer or smaller images.',
+          );
+        }
+      }
+
       /** Body includes auth; use `text/plain` so the browser avoids CORS preflight (Apps Script often cannot answer OPTIONS). */
       const body = JSON.stringify({
         ...payload,
         fleetSecret: secret,
+        ...(photoUploads && photoUploads.length > 0 ? { photoUploads } : {}),
       });
+
+      setSubmitMsg(null);
 
       const res = await fetch(ingestUrl, {
         method: 'POST',
@@ -398,8 +451,13 @@ export default function App() {
         );
       }
 
-      setSubmitMsg('Submitted to your sheet.');
+      setSubmitMsg(
+        files.length > 0
+          ? 'Submitted — row added; photos uploaded to Drive (see photoDriveLinks in Sheet).'
+          : 'Submitted to your sheet.',
+      );
     } catch (e) {
+      setSubmitMsg(null);
       setSubmitErr(
         e instanceof Error ? e.message : 'Submit failed. Check network and CORS.',
       );
@@ -412,18 +470,15 @@ export default function App() {
     return (
       <div className="app-shell">
         <header className="brand-strip">
-          <div className="brand-title">
-            <h1>Fleet Logs</h1>
-            <p className="brand-sub">Photos → Sheet (fleet access)</p>
+          <div className="brand-leading">
+            <BrandMark />
+            <div className="brand-title">
+              <h1>Fleet Logs</h1>
+              <p className="brand-sub">Photos → Sheet (fleet access)</p>
+            </div>
           </div>
           <span className="pill-muted">Mobile</span>
         </header>
-
-        <div className="hero-map" aria-hidden>
-          <div className="hero-pin">
-            <div className="hero-pin-dot" />
-          </div>
-        </div>
 
         <main className="card stack">
           <div>
@@ -460,20 +515,17 @@ export default function App() {
   return (
     <div className="app-shell app-shell--session">
       <header className="brand-strip">
-        <div className="brand-title">
-          <h1>Fleet Logs</h1>
-          <p className="brand-sub">{selectedVehicleLabel}</p>
+        <div className="brand-leading">
+          <BrandMark />
+          <div className="brand-title">
+            <h1>Fleet Logs</h1>
+            <p className="brand-sub">{selectedVehicleLabel}</p>
+          </div>
         </div>
         <button type="button" className="btn btn-ghost" onClick={handleLock}>
           Lock
         </button>
       </header>
-
-      <div className="hero-map" aria-hidden>
-        <div className="hero-pin">
-          <div className="hero-pin-dot" />
-        </div>
-      </div>
 
       <div className="session-scroll">
         <main className="card stack">
@@ -511,10 +563,10 @@ export default function App() {
         </div>
 
         <div>
-          <label className="label" htmlFor="photos-gallery-input">
+          <div className="label" id="photos-section-label">
             Photos
-          </label>
-          <div className="upload-zone">
+          </div>
+          <div className="upload-zone" aria-labelledby="photos-section-label">
             <strong>Capture or pick multiple</strong>
             <p>Use the camera for several snaps (odometer, cashcard, etc.), or add shots from gallery.</p>
 
@@ -566,17 +618,26 @@ export default function App() {
             {cameraError ? <div className="error-banner">{cameraError}</div> : null}
 
             <div className="gallery-picker-row">
-              <label htmlFor="photos-gallery-input" className="btn btn-secondary gallery-picker-label">
-                Add from gallery (multi-select)
+              <label className="btn btn-secondary gallery-picker-label">
+                <span className="gallery-picker-label-text">
+                  Add from gallery (multi-select)
+                </span>
+                {/*
+                  Full-size transparent input over the button — clipped 1×1 “visually hidden”
+                  inputs often fail to receive touches or return files on iOS / some Android.
+                */}
                 <input
                   id="photos-gallery-input"
                   type="file"
-                  accept="image/*"
+                  accept="image/*,image/heic,image/heif,.heic,.heif"
                   multiple
-                  className="visually-hidden"
+                  className="gallery-picker-input"
+                  aria-label="Add photos from gallery, multiple selection allowed"
                   onChange={(e) => {
-                    onGalleryPick(e.target.files);
-                    e.target.value = '';
+                    const input = e.currentTarget;
+                    const picked = input.files?.length ? Array.from(input.files) : [];
+                    input.value = '';
+                    onGalleryPick(picked);
                   }}
                 />
               </label>
@@ -596,7 +657,7 @@ export default function App() {
           {files.length > 0 ? (
             <ul className="file-list" aria-label="Selected photos">
               {files.map((f, i) => (
-                <li key={`${f.name}-${f.size}-${i}`}>
+                <li key={`${f.name}-${f.size}-${f.lastModified}-${i}`}>
                   <span className="file-list-name">{f.name}</span>
                   <span className="file-list-meta">
                     <span>{(f.size / 1024).toFixed(0)} KB</span>
