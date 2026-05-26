@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Optional: copy `.env.example` to `.env` and set `VITE_FLEET_PASSWORD` to **override** the built-in default unlock code (`grabmapssg` when the env var is unset).
+Optional: copy `.env.example` to `.env` and set `VITE_FLEET_PASSWORD` to **override** the built-in default unlock code
 
 ## OCR (stay free)
 
