@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Optional: copy `.env.example` to `.env` and set `VITE_FLEET_PASSWORD` to **override** the built-in default unlock code
+Optional: copy `.env.example` to `.env` and set `VITE_FLEET_PASSWORD` to **override** the built-in default unlock code, and **`VITE_INGEST_URL`** for local Submit testing. With **`npm run dev`**, requests go through a Vite proxy (`/__fleet_ingest`) so localhost is not blocked by cross-origin CORS to Google.
 
 ## OCR (stay free)
 
@@ -38,12 +38,24 @@ Local build (any base): `npm run build` → `dist/`. For a local preview that ma
    - Optionally **`SHEET_ID`** to override the `SHEET_ID` constant in code.
 3. Replace **`SHEET_ID`** in `INGEST_SAMPLE.gs` with your spreadsheet ID if you’re not using the script property.
 4. **Deploy** → **Web app** (**Execute as: Me**, **who has access: Anyone**).
-5. In GitHub (**the same repo that hosts this app**): **Settings** → **Secrets and variables** → **Actions**. Add **`VITE_INGEST_URL`** as either a **repository Secret** _or_ a **Variable** (same name — the workflow uses whichever is set). Value = Apps Script Web app **`…/exec`** URL. **Re-run “Deploy to GitHub Pages”** after saving so `npm run build` picks it up.
+5. Tell the build where your Apps Script **`…/exec`** URL is (**pick one**):
+   - **GitHub:** **Settings** → **Secrets and variables** → **Actions** → add **`VITE_INGEST_URL`** as a **Secret** or **Variable** (exact name). **Re-run “Deploy to GitHub Pages”.**
+   - **Or in the repo:** copy **`public/fleet-config.example.json`** → **`public/fleet-config.json`**, paste your Web App URL into **`ingestUrl`**, commit, push. The workflow bakes it into the site at build time.
+
+   If the live app still says **“Not sent — no server.”**, the last Pages deploy was built **without** either of the above — fix config and **re-run the workflow** (hard-refresh the site after).
 6. Push to **`main`** (or re-run **Deploy to GitHub Pages**) so CI picks up **`VITE_INGEST_URL`**.
 
 Submit sends **`photoUploads`** (`name`, `mimeType`, **base64**) plus row fields; the script saves images to **`DRIVE_FOLDER_ID`** and writes **`photoDriveLinks`** (newline-separated URLs) into the **`Logs`** tab. Large batches / huge photos can hit **Apps Script** POST or timeout limits — keep submits reasonable.
 
 The app POSTs **`fleetSecret`** inside JSON with **`Content-Type: text/plain`** so mobile browsers avoid bad CORS preflights.
+
+### Troubleshooting Submit (CORS / 401)
+
+| Symptom | What it usually means |
+|--------|------------------------|
+| **localhost** shows CORS blocking `script.google.com` | Use **`npm run dev`** with **`VITE_INGEST_URL`** in `.env`. The dev server forwards **`/__fleet_ingest`** to that URL so the browser only talks to localhost. |
+| **401 Unauthorized** | Web app **Who has access** is too strict (e.g. Workspace-only while the browser is not an allowed identity), or you need a new deployment. For fleet phones on the public web, **Anyone** is often required alongside **Execute as: Me**. |
+| CORS message + 401 together | Google returns a **401 / login** page **without** `Access-Control-Allow-Origin`; Chrome reports CORS even though the underlying problem is **access / SSO**. Fix the deployment, not only CORS. |
 
 **Existing Logs sheet:** if you already have a header row, insert new columns to match **`gas/INGEST_SAMPLE.gs`** (`tripKind` after `vehicleLabel`, and **`photoDriveLinks`** at the end) before the next submit so columns line up.
 

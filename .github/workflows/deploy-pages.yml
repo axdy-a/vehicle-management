@@ -31,11 +31,16 @@ jobs:
         env:
           VITE_INGEST_URL: ${{ secrets.VITE_INGEST_URL || vars.VITE_INGEST_URL }}
         run: |
-          if [ -z "$VITE_INGEST_URL" ]; then
-            echo "::warning title=Missing VITE_INGEST_URL::The build will embed an empty ingest URL. Add Actions **Secret** OR **Variable** named VITE_INGEST_URL for this repo, then re-run the workflow (Variables: Settings → Secrets and variables → Actions → Variables tab)."
-          else
-            echo "VITE_INGEST_URL is set for this build (${#VITE_INGEST_URL} chars)."
+          if [ -n "$VITE_INGEST_URL" ]; then
+            echo "VITE_INGEST_URL from GitHub Actions (${#VITE_INGEST_URL} chars)."
+            exit 0
           fi
+          if [ -f public/fleet-config.json ] && grep -q '/exec' public/fleet-config.json; then
+            echo "Using public/fleet-config.json for ingest URL at build time."
+            exit 0
+          fi
+          echo "::error title=Missing ingest URL::Add GitHub Actions secret or variable VITE_INGEST_URL, OR commit public/fleet-config.json (copy from fleet-config.example.json). Then re-run this workflow."
+          exit 1
 
       - name: Install and build
         run: npm ci && npm run build

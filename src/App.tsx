@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getIngestFetchUrl } from './ingest/endpoint';
 import { scanPhotosForMetrics } from './ocr/scanPhotos';
 import { encodePhotosForDrive } from './upload/encodePhotosForDrive';
 
@@ -143,12 +144,8 @@ export default function App() {
   const [cameraSnapFlash, setCameraSnapFlash] = useState(false);
   /** Non-zero drives remount animation for capture toast banner. */
   const [captureBannerKey, setCaptureBannerKey] = useState(0);
-  const captureBannerTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(
-    null,
-  );
-  const cameraSnapFlashTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(
-    null,
-  );
+  const captureBannerTimerRef = useRef<number | null>(null);
+  const cameraSnapFlashTimerRef = useRef<number | null>(null);
 
   const stopCamera = useCallback(() => {
     if (captureBannerTimerRef.current) {
@@ -449,7 +446,7 @@ export default function App() {
       files,
       fitToDriveConfirmed,
     );
-    const ingestUrl = import.meta.env.VITE_INGEST_URL?.trim();
+    const ingestUrl = getIngestFetchUrl();
 
     if (!ingestUrl) {
       setSubmitMsg('Not sent — no server.');
@@ -493,10 +490,41 @@ export default function App() {
         body,
       });
 
+      const text = await res.text().catch(() => '');
+
       if (!res.ok) {
-        const hint = await res.text().catch(() => '');
-        console.warn('[submit]', res.status, hint.slice(0, 500));
+        console.warn('[submit]', res.status, text.slice(0, 800));
+        const looksLikeGoogleHtml =
+          /<\s*!DOCTYPE\s+html|<\s*html\b/i.test(text) ||
+          /\bPage Not Found\b/i.test(text);
+        if (res.status === 401 || res.status === 403 || looksLikeGoogleHtml) {
+          /** HTML / 401 from Google edge — script `doPost` did not run; not fleet PIN vs FLEET_SECRET. */
+          throw new Error(
+            "Can't reach the sheet endpoint — redeploy Web App (new /exec URL?), set Who has access to Anyone, or fix Workspace SSO blocking.",
+          );
+        }
         throw new Error('Server error.');
+      }
+
+      try {
+        const parsed: unknown = JSON.parse(text);
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          'ok' in parsed &&
+          (parsed as { ok: unknown }).ok === false
+        ) {
+          const rec = parsed as Record<string, unknown>;
+          const msg =
+            typeof rec.error === 'string'
+              ? rec.error.slice(0, 120)
+              : 'Rejected by server.';
+          throw new Error(msg);
+        }
+      } catch (e) {
+        if (e instanceof SyntaxError) {
+          /* Non-JSON 200 — treat as success for older deployments */
+        } else throw e;
       }
 
       setSubmitMsg(files.length > 0 ? 'Submitted with photos.' : 'Submitted.');
